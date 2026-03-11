@@ -2,7 +2,7 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-from jaxrobotarium.robotarium_env import *
+from jaxrobotarium.robotarium_env import RobotariumEnv, State
 
 @pytest.fixture
 def env():
