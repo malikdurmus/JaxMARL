@@ -32,7 +32,8 @@ dependencies = [
   "scipy",
   "gymnax",
   "wandb",
-  "pettingzoo"
+  "pettingzoo",
+  "imageio>=2.37.3",
 ]
 
 [project.optional-dependencies]
