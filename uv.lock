@@ -1329,14 +1329,18 @@ dependencies = [
     { name = "jax", version = "0.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "jaxlib", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "jaxlib", version = "0.9.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jaxrobotarium" },
     { name = "matplotlib" },
     { name = "mujoco" },
     { name = "pettingzoo" },
     { name = "pillow" },
+    { name = "robotarium-python-simulator" },
     { name = "safetensors" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "wandb" },
+    { name = "warp" },
+    { name = "warp-lang" },
 ]
 
 [package.optional-dependencies]
@@ -1356,12 +1360,8 @@ cuda12 = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "jaxrobotarium" },
     { name = "pygame" },
     { name = "pytest" },
-    { name = "robotarium-python-simulator" },
-    { name = "warp" },
-    { name = "warp-lang" },
 ]
 
 [package.metadata]
@@ -1377,27 +1377,27 @@ requires-dist = [
     { name = "jax" },
     { name = "jax", extras = ["cuda12"], marker = "extra == 'cuda12'" },
     { name = "jaxlib" },
+    { name = "jaxrobotarium", editable = "jaxmarl/environments/robotarium" },
     { name = "matplotlib" },
     { name = "mujoco" },
     { name = "omegaconf", marker = "extra == 'algs'" },
     { name = "optax", marker = "extra == 'algs'" },
     { name = "pettingzoo" },
     { name = "pillow" },
+    { name = "robotarium-python-simulator", editable = "jaxmarl/environments/robotarium/jaxrobotarium/robotarium_python_simulator" },
     { name = "safetensors" },
     { name = "scipy" },
     { name = "tqdm", marker = "extra == 'algs'" },
     { name = "wandb" },
+    { name = "warp", specifier = ">=1.0.4" },
+    { name = "warp-lang", specifier = ">=1.12.0" },
 ]
 provides-extras = ["algs", "cuda12"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "jaxrobotarium", editable = "jaxmarl/environments/robotarium" },
     { name = "pygame" },
     { name = "pytest" },
-    { name = "robotarium-python-simulator", editable = "jaxmarl/environments/robotarium/jaxrobotarium/robotarium_python_simulator" },
-    { name = "warp", specifier = ">=1.0.4" },
-    { name = "warp-lang", specifier = ">=1.12.0" },
 ]
 
 [[package]]
