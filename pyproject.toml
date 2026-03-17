@@ -7,7 +7,7 @@ authors = [
   ]
 dynamic = ["version"]
 license = {file = "LICENSE"}
-requires-python = ">=3.10"
+requires-python = "==3.12.3"
 classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -38,6 +38,8 @@ dependencies = [
   "robotarium-python-simulator", # Changed from rps-jax
   "warp>=1.0.4",
   "warp-lang>=1.12.0",
+  "pytest",
+  "pygame",
 ]
 
 [project.optional-dependencies]
@@ -50,12 +52,6 @@ algs = [
     "tqdm",
 ]
 cuda12 = ["jax[cuda12]"]
-
-[dependency-groups]
-dev = [
-  "pytest",
-  "pygame",
-]
 
 [tool.uv.sources]
 jaxrobotarium = { path = "jaxmarl/environments/robotarium", editable = true }
