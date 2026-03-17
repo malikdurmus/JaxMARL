@@ -26,10 +26,13 @@ from .jaxnav import JaxNav
 
 # Submoduled environments
 try:
-    print("Importing submoduled environments...")
-    from jaxrobotarium import Navigation, Discovery, MaterialTransport, Warehouse, ArcticTransport, Foraging, RWARE, PredatorPrey
+    from jaxrobotarium import (
+        Navigation, Discovery, MaterialTransport, 
+        Warehouse, ArcticTransport, Foraging, 
+        RWARE, PredatorPrey
+    )
     SUBMODULE_ENVIRONMENTS = True
-    print("Submoduled environments imported successfully.")
-except ImportError:
-    print("Submoduled environments not found. Skipping import.")
+    print("JaxRobotarium found in site-packages. Ready!")
+except (ImportError, ModuleNotFoundError) as e:
+    print(f"JaxRobotarium not found. Skipping. Reason: {e}") 
     SUBMODULE_ENVIRONMENTS = False
