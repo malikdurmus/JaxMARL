@@ -86,7 +86,8 @@ def discrete_act_map(action: int) -> jnp.ndarray:
 AGENT_BASE = "agent"
 MAP_PARAMS = {
     "map_size": (11, 11),
-    "fill": 0.3,
+    "min_fill": 0.0,
+    "max_fill": 0.3,
 }
 
 ## ---- Environment ----

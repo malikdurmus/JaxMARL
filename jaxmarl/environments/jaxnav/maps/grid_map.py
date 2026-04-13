@@ -30,7 +30,8 @@ class GridMapCircleAgents(Map):
                  num_agents: int,
                  rad,
                  map_size: Tuple[int, int],
-                 fill: float=0.4,
+                 min_fill: float=0.0,
+                 max_fill: float=0.4,
                  cell_size: float=1.0,
                  sample_test_case_type='random',
                  **map_kwargs):
@@ -56,9 +57,12 @@ class GridMapCircleAgents(Map):
             self.sample_test_case_type = SampleTestCaseTypes.GRID
         else:
             raise ValueError(f"Invalid sample_test_case_type: {sample_test_case_type}")
-        self.fill = fill
+        
+        self.min_fill = min_fill
+        self.max_fill = max_fill
         self.free_grids = (self.width-2)*(self.height-2)
-        self.n_clutter = jnp.floor(self.free_grids*self.fill).astype(int)
+        self.min_n_clutter = jnp.floor(self.free_grids*self.min_fill).astype(int)
+        self.max_n_clutter = jnp.floor(self.free_grids*self.max_fill).astype(int)
     
     @partial(jax.jit, static_argnums=[0])
     def sample_test_case(self, rng: chex.PRNGKey):
@@ -151,7 +155,7 @@ class GridMapCircleAgents(Map):
         base_map = self._gen_base_grid()
 
         free_idx = jnp.arange(0, self.free_grids)
-        num_fill = jax.random.randint(key_fill, (1,), 0, self.n_clutter)[0]
+        num_fill = jax.random.randint(key_fill, (1,), self.min_n_clutter, self.max_n_clutter)[0]
         
         map_within = jnp.where(free_idx<num_fill, 1, 0)
         #map_fill = jax.random.shuffle(key_shuff, map_within)
@@ -415,7 +419,7 @@ class GridMapCircleAgents(Map):
         )
         d = set_distances_to_go[_flatten_idx(end[0], end[1])]
         valid = d < INF
-        return valid, jax.lax.select(valid, d, 0.0)
+        return valid, jax.lax.select(valid, d, jnp.array([0.0,0.0]))
         
     ### === VISUALIZATION === ###
     def plot_map(self, ax: axes.Axes, map_grid: jnp.ndarray):
