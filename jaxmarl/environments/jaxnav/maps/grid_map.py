@@ -64,86 +64,114 @@ class GridMapCircleAgents(Map):
         self.min_n_clutter = jnp.floor(self.free_grids*self.min_fill).astype(int)
         self.max_n_clutter = jnp.floor(self.free_grids*self.max_fill).astype(int)
     
-    @partial(jax.jit, static_argnums=[0])
-    def sample_test_case(self, rng: chex.PRNGKey):
+    @partial(jax.jit, static_argnums=[0, 2])
+    def sample_test_case(self, rng: chex.PRNGKey, solvability: str = "both"):
         
         return jax.lax.switch(
             self.sample_test_case_type,
             [
-                super().sample_test_case,
-                self.grid_sample_test_case,
+                lambda k: super(GridMapCircleAgents, self).sample_test_case(k, solvability),
+                lambda k: self.grid_sample_test_case(k, solvability),
             ],
             rng
         )
         
-    def grid_sample_test_case(self, key):
+    def grid_sample_test_case(self, key, solvability="both"):
         """ NOTE this won't throw an error if it's not possible, will just loop forever"""
         assert self.cell_size == 1.0
-        
-        key, _key = jax.random.split(key)
-        map_data = self.sample_map(_key)
-        inside_grid = map_data.at[1:-1, 1:-1].get()
-        iwidth = self.width - 2
-        
-        def _sample_pair(key, start_masks, goal_masks):
+
+        def loop_cond(val):
+            found_valid_map, _, _, _ = val
+            return ~found_valid_map
             
-            flat_occ = start_masks.flatten()
-            key, _key = jax.random.split(key)
-            start_idx = jax.random.choice(_key, len(flat_occ), (1,), p=(1-flat_occ))[0]
-            start = jnp.array([start_idx % iwidth, start_idx // iwidth])  # [x, y]
-            actual_idx = (start + 1).astype(jnp.int32)
-            # connected_region = _graph_utils.component_mask_with_pos(inside_grid, start_idx)  # BUG not working on inside grid
-            if self.valid_path_check:
-                connected_region = _graph_utils.component_mask_with_pos(map_data, actual_idx).at[1:-1, 1:-1].get()
-            else:
-                connected_region = 1-inside_grid
-            masked_start = connected_region.at[start[1], start[0]].set(0)
-            goal_possibilities = masked_start & (1 - goal_masks)
-            valid = jnp.any(goal_possibilities)  # only valid if possible goal locations
-                        
-            goal_idx = jax.random.choice(key, len(flat_occ), (1,), p=goal_possibilities.flatten())[0]
-            goal = jnp.array([goal_idx % iwidth, goal_idx // iwidth])  # [x, y]
+        def loop_body(val):
+            _, loop_key, _, _ = val
+            key, _key = jax.random.split(loop_key)
+            map_data = self.sample_map(_key)
+            inside_grid = map_data.at[1:-1, 1:-1].get()
+            iwidth = self.width - 2
             
-            return valid, start, goal
-            
-        def scan_fn(carry, rng):
-            i, pos, start_mask, goal_mask = carry
-            def _cond_fn(val):                
-                return val[0] 
-            
-            def _body_fn(val):
-                valid, rng, pos = val
+            def _sample_pair(key, start_masks, goal_masks):
                 
-                rng, _rng_pair = jax.random.split(rng)
-                valid, start, goal = _sample_pair(_rng_pair, start_mask, goal_mask)
+                flat_occ = start_masks.flatten()
+                key, _key = jax.random.split(key)
+                start_idx = jax.random.choice(_key, len(flat_occ), (1,), p=(1-flat_occ))[0]
+                start = jnp.array([start_idx % iwidth, start_idx // iwidth])  # [x, y]
+                actual_idx = (start + 1).astype(jnp.int32)
                 
-                positions = jnp.concatenate([start[None], goal[None]], axis=0)
-                pos = pos.at[i].set(positions)
+                if solvability == "solvable":
+                    connected_region = _graph_utils.component_mask_with_pos(map_data, actual_idx).at[1:-1, 1:-1].get()
+                    masked_start = connected_region.at[start[1], start[0]].set(0)
+                    goal_possibilities = masked_start & (1 - goal_masks)
+                elif solvability == "unsolvable":
+                    connected_region = _graph_utils.component_mask_with_pos(map_data, actual_idx).at[1:-1, 1:-1].get()
+                    free_space = 1 - inside_grid
+                    unconnected_region = free_space - connected_region
+                    masked_start = unconnected_region.at[start[1], start[0]].set(0) 
+                    goal_possibilities = masked_start & (1 - goal_masks)
+                else: # both
+                    if self.valid_path_check:
+                        connected_region = _graph_utils.component_mask_with_pos(map_data, actual_idx).at[1:-1, 1:-1].get()
+                    else:
+                        connected_region = 1-inside_grid
+                    masked_start = connected_region.at[start[1], start[0]].set(0)
+                    goal_possibilities = masked_start & (1 - goal_masks)
+
+                valid = jnp.any(goal_possibilities)  # only valid if possible goal locations
+                goal_distribution = jax.lax.select(valid, goal_possibilities.flatten(), jnp.ones_like(goal_possibilities.flatten()))
+                goal_idx = jax.random.choice(key, len(flat_occ), (1,), p=goal_distribution)[0]
+                goal = jnp.array([goal_idx % iwidth, goal_idx // iwidth])  # [x, y]
                 
-                return jnp.bitwise_not(valid), rng, pos
+                return valid, start, goal
+                
+            def scan_fn(carry, rng):
+                i, pos, start_mask, goal_mask, abort_map = carry
+                def _cond_fn(val):                
+                    return val[0] & ~val[4] 
+                
+                def _body_fn(val):
+                    valid, rng, pos, retries, aborted = val
+                    
+                    rng, _rng_pair = jax.random.split(rng)
+                    valid, start, goal = _sample_pair(_rng_pair, start_mask, goal_mask)
+                    
+                    positions = jnp.concatenate([start[None], goal[None]], axis=0)
+                    pos = pos.at[i].set(positions)
+                    
+                    retries += 1
+                    aborted = retries > 100
+                    
+                    return jnp.bitwise_not(valid), rng, pos, retries, aborted
+                
+                (_, rng, pos, retries, abort_map) = jax.lax.while_loop(
+                    _cond_fn,
+                    _body_fn,
+                    (True, rng, pos, 0, abort_map)                
+                )
+                
+                start = pos.at[i, 0].get().astype(jnp.int32)
+                goal = pos.at[i, 1].get().astype(jnp.int32)
+                start_mask = start_mask.at[start[1], start[0]].set(1)
+                goal_mask = goal_mask.at[goal[1], goal[0]].set(1)
+                return (i+1, pos, start_mask, goal_mask, abort_map), None
             
-            (_, rng, pos) = jax.lax.while_loop(
-                _cond_fn,
-                _body_fn,
-                (True, rng, pos)                
-            )
+            fill_max = jnp.max(jnp.array(self.map_size)) + self.rad*2
+            pos = jnp.full((self.num_agents, 2, 2), fill_max)  # [num_agents, [start_pose, goal_pose]]
             
-            start = pos.at[i, 0].get().astype(jnp.int32)
-            goal = pos.at[i, 1].get().astype(jnp.int32)
-            start_mask = start_mask.at[start[1], start[0]].set(1)
-            goal_mask = goal_mask.at[goal[1], goal[0]].set(1)
-            return (i+1, pos, start_mask, goal_mask), None
-        
-                
-        fill_max = jnp.max(jnp.array(self.map_size)) + self.rad*2
-        pos = jnp.full((self.num_agents, 2, 2), fill_max)  # [num_agents, [start_pose, goal_pose]]
-        
-        key, key_scan = jax.random.split(key)
-        key_scan = jax.random.split(key_scan, self.num_agents)
-        (_, pos, _, _), _ = jax.lax.scan(scan_fn, (0, pos, inside_grid, inside_grid), key_scan)
-        theta = jax.random.uniform(key, (self.num_agents, 2, 1), minval=-jnp.pi, maxval=jnp.pi)
-        cases = jnp.concatenate([pos + 1.5, theta], axis=2)
-        
+            key, key_scan = jax.random.split(key)
+            key_scan = jax.random.split(key_scan, self.num_agents)
+            (_, pos, _, _, abort_map), _ = jax.lax.scan(scan_fn, (0, pos, inside_grid, inside_grid, False), key_scan)
+            theta = jax.random.uniform(key, (self.num_agents, 2, 1), minval=-jnp.pi, maxval=jnp.pi)
+            cases = jnp.concatenate([pos + 1.5, theta], axis=2)
+            
+            found_valid_map = ~abort_map
+            return found_valid_map, loop_key, cases, map_data
+            
+        dummy_cases = jnp.concatenate([jnp.full((self.num_agents, 2, 2), jnp.max(jnp.array(self.map_size)) + self.rad*2) + 1.5, jnp.zeros((self.num_agents, 2, 1))], axis=2)
+        dummy_map_data = jnp.zeros((self.map_size[1], self.map_size[0]), dtype=jnp.int32)
+        init_val = (jnp.bool_(False), key, dummy_cases, dummy_map_data)
+        found_valid_map, key, cases, map_data = jax.lax.while_loop(loop_cond, loop_body, init_val)
+
         return map_data, cases
         
     @partial(jax.jit, static_argnums=[0])

@@ -56,122 +56,110 @@ class Map(object):
     def sample_map(self, key):
         raise NotImplementedError
     
-    @partial(jax.jit, static_argnums=[0])
-    def sample_test_case(self, key):
+    @partial(jax.jit, static_argnums=[0, 2])
+    def sample_test_case(self, key, solvability="both"):
         """ Sample a test case for a given map """
-        key, _key = jax.random.split(key)
-        map_data = self.sample_map(_key)
-        radii = jnp.array([self.rad*self.start_pad, self.goal_radius])
-
-        def _sample_pair(key: chex.PRNGKey):
-            """ Sample a start and goal pose for an agent """  
-            key_s, key_g, key_t, key_d, key_angle = jax.random.split(key, 5) 
         
-            low_lim = 1 + self.rad                             
-            high_lim = self.map_size[1] - 1 - self.rad         
+        def loop_cond(val):
+            found_valid_map, _, _, _ = val
+            return ~found_valid_map
             
-            start = jax.random.uniform(key_s, (1, 2), minval=low_lim, maxval=high_lim)
-           
-            distance = jax.random.uniform(key_d,minval =self.min_dist_to_goal, maxval =self.max_dist_to_goal)
-            
-            angle = jax.random.uniform(key_angle, (1,), minval=-jnp.pi, maxval=jnp.pi)
+        def loop_body(val):
+            _, map_data, case, loop_key = val
+            loop_key, _key = jax.random.split(loop_key)
+            map_data = self.sample_map(_key)
+            radii = jnp.array([self.rad*self.start_pad, self.goal_radius])
 
-            offset = jnp.concatenate([distance * jnp.cos(angle), distance * jnp.sin(angle)] , axis=0)
-            goal = jnp.clip(start + offset, low_lim, high_lim)  # clip as a safety net
+            def _sample_pair(key: chex.PRNGKey):
+                """ Sample a start and goal pose for an agent """  
+                key_s, key_g, key_t, key_d, key_angle = jax.random.split(key, 5) 
             
-            theta = jax.random.uniform(key_t, (2, 1), minval=-jnp.pi, maxval=jnp.pi)
-            positions = jnp.concatenate([start, goal], axis=0)
-            poses = jnp.concatenate([positions, theta], axis=1)
-            return poses
+                low_lim = 1 + self.rad                             
+                high_lim = self.map_size[1] - 1 - self.rad         
+                
+                start = jax.random.uniform(key_s, (1, 2), minval=low_lim, maxval=high_lim)
+               
+                distance = jax.random.uniform(key_d,minval =self.min_dist_to_goal, maxval =self.max_dist_to_goal)
+                
+                angle = jax.random.uniform(key_angle, (1,), minval=-jnp.pi, maxval=jnp.pi)
 
-        
-        def _agent_collision(pos, test_case, rad): 
-            dists = jnp.linalg.norm(test_case-pos, axis=1) <= rad*2
-            return jnp.any(dists)
-        
-        def _cond_idx(val):
-            """ true while i is less than the number of agents """
-            key, i, case = val
-            return i < case.shape[0]
-        
-        def _body_idx(val, key):
-            """ samples a start and goal pair for an agent, taking into account pairs sampled previously """
-            i, case = val
-            def _cond_pos(val):
-                """ Check if the sampled pair is valid. Checks
-                1. check start and goal do not collide with the map
-                3. check the start is not within a radius with other agents' starts
-                4. check the start is not within a radius with other agents' starts 
-                5. check if start and goal are too close
-                """
+                offset = jnp.concatenate([distance * jnp.cos(angle), distance * jnp.sin(angle)] , axis=0)
+                goal = jnp.clip(start + offset, low_lim, high_lim)  # clip as a safety net
                 
-                key, pair, case = val
-                temp_case = case.at[i].set(pair+self.rad*3)  # ensure no conflict 
-                
-                map_collisions = jnp.any(jax.vmap(self.check_circle_map_collision, in_axes=[0, None, 0])(pair[:, :2], map_data, radii))
-                agent_collisions = jnp.any(jax.vmap(_agent_collision, in_axes=[0, 1, None])(pair[:, :2], temp_case[:, :, :2], self.rad*self.start_pad))
-                
-                too_close = (jnp.linalg.norm(pair[0, :2] - pair[1, :2]) <= 2*self.rad).astype(jnp.bool_)
-                
-                check = map_collisions | agent_collisions | too_close
-                
-                if self.valid_path_check:
-                    valid_path = self.passable_check(pair[0, :2], pair[1, :2], map_data)  # WARNING can make code too slow
-                    check = check | ~valid_path
-                
-                return check
-                                
-                # return map_collisions | agent_collisions | too_close | ~valid_path
-                
-                #print('p map', jnp.any(pmap_collision(pair, map_grid, rad)))
-                #jax.debug.print('p {pair} map {p}, s ag {s}, g ag {g}, dist f{d} dist {c}', pair=pair, p=jnp.any(pmap_collision(pair, map_grid, rad)), s=agent_collision(pair[0], temp_case[:, 0, :], rad), g=agent_collision(pair[1], temp_case[:, 1, :], rad), d=jnp.linalg.norm(pair[0] - pair[1]) >= dist_to_goal, c=(jnp.linalg.norm(pair[0] - pair[1]) <= 2*rad).astype(jnp.bool_))
-                """ true while pos is not valid """
-                # 1. check if start collides with map
-                # 2. check if goal collides with map
-                # 3. check if start collides with other agents
-                # 4. check if goal collides with other agents's goals 
-                # 5. check if start and goal are too close
-                
-                return self.check_agent_map_collision(pair[0], map_data, self.rad*self.start_pad) \
-                    | self.check_agent_map_collision(pair[1], map_data) \
-                    | _agent_collision(pair[0], temp_case[:, 0, :], self.rad) \
-                    | _agent_collision(pair[1], temp_case[:, 1, :], self.rad) \
-                    | (jnp.linalg.norm(pair[0] - pair[1]) >= self.dist_to_goal).astype(jnp.bool_) \
-                    | (jnp.linalg.norm(pair[0] - pair[1]) <= 2*self.rad).astype(jnp.bool_) #\ | ~(self.rrt(key_rrt, map_data, pair[0], pair[1]))
-        
-            def _body_pos(val):
-                """ Sample a start and goal pair """
-                key, pair, case = val
+                theta = jax.random.uniform(key_t, (2, 1), minval=-jnp.pi, maxval=jnp.pi)
+                positions = jnp.concatenate([start, goal], axis=0)
+                poses = jnp.concatenate([positions, theta], axis=1)
+                return poses
+
+            
+            def _agent_collision(pos, test_case, rad): 
+                dists = jnp.linalg.norm(test_case-pos, axis=1) <= rad*2
+                return jnp.any(dists)
+            
+            def _body_idx(val, key):
+                """ samples a start and goal pair for an agent, taking into account pairs sampled previously """
+                i, case, abort_map = val
+                def _cond_pos(val):
+                    key, pair, case, retries, aborted = val
+                    temp_case = case.at[i].set(pair+self.rad*3)  # ensure no conflict 
+                    
+                    map_collisions = jnp.any(jax.vmap(self.check_circle_map_collision, in_axes=[0, None, 0])(pair[:, :2], map_data, radii))
+                    agent_collisions = jnp.any(jax.vmap(_agent_collision, in_axes=[0, 1, None])(pair[:, :2], temp_case[:, :, :2], self.rad*self.start_pad))
+                    
+                    too_close = (jnp.linalg.norm(pair[0, :2] - pair[1, :2]) <= 2*self.rad).astype(jnp.bool_)
+                    
+                    check = map_collisions | agent_collisions | too_close
+                    
+                    if self.valid_path_check or solvability != "both":
+                        valid_path = self.passable_check(pair[0, :2], pair[1, :2], map_data)
+                        if solvability == "solvable":
+                            check = check | ~valid_path
+                        elif solvability == "unsolvable":
+                            check = check | valid_path
+                        else: # both
+                            if self.valid_path_check:
+                                check = check | ~valid_path
+                    return check & ~aborted
+            
+                def _body_pos(val):
+                    """ Sample a start and goal pair """
+                    key, pair, case, retries, aborted = val
+                    key, key_point = jax.random.split(key)
+                    pair = _sample_pair(key_point)
+                    case = case.at[i].set(pair)
+                    retries += 1
+                    aborted = retries > 100
+                    return key, pair, case, retries, aborted
+            
                 key, key_point = jax.random.split(key)
                 pair = _sample_pair(key_point)
                 case = case.at[i].set(pair)
-                #jax.debug.print('case {c}', c=case)
-                return key, pair, case
-        
-            key, key_point = jax.random.split(key)
-            pair = _sample_pair(key_point)
-            case = case.at[i].set(pair)
-                        
-            key, pair, case = jax.lax.while_loop(
-                _cond_pos,
-                _body_pos,
-                (key, pair, case),
-            )
+                            
+                key, pair, case, retries, aborted = jax.lax.while_loop(
+                    _cond_pos,
+                    _body_pos,
+                    (key, pair, case, 0, abort_map),
+                )
+                
+                i += 1
+                return (i, case, aborted), None
+
+            fill_max = jnp.max(jnp.array(self.map_size)) + self.rad*2
+            case = jnp.full((self.num_agents, 2, 3), fill_max)  # [num_agents, [start_pose, goal_pose]]
+
+            i = 0
             
-            i += 1
-            return (i, case), None
+            key_scan = jax.random.split(loop_key, self.num_agents)
+            (_, case, abort_map), _ = jax.lax.scan(_body_idx, (i, case, False), key_scan)
+            
+            found_valid_map = ~abort_map
+            return found_valid_map, map_data, case, loop_key
 
-        fill_max = jnp.max(jnp.array(self.map_size)) + self.rad*2
-        case = jnp.full((self.num_agents, 2, 3), fill_max)  # [num_agents, [start_pose, goal_pose]]
-
-        i = 0
         
-        key_scan = jax.random.split(key, self.num_agents)
-        (_, case), _ = jax.lax.scan(_body_idx, (i, case), key_scan)
-        
-        # Add intial orientation
-        #theta = jax.random.uniform(key, (self.num_agents, 2, 1), minval=-jnp.pi, maxval=jnp.pi)
-        #case = jnp.concatenate([case, theta], axis=-1)        
+        dummy_map_data = jnp.zeros((self.map_size[1], self.map_size[0]), dtype=jnp.int32)
+        dummy_case = jnp.zeros((self.num_agents, 2, 3))
+        init_val = (jnp.bool_(False), dummy_map_data, dummy_case, key)
+        found_valid_map, map_data, case, key = jax.lax.while_loop(loop_cond, loop_body, init_val)
         return map_data, case
     
     @partial(jax.jit, static_argnums=[0])

@@ -200,11 +200,11 @@ class JaxNav(MultiAgentEnv):
         return self._map_obj
     
     
-    @partial(jax.jit, static_argnums=[0])  
-    def reset(self, key: chex.PRNGKey) -> Tuple[Dict[str, chex.Array], State]:
+    @partial(jax.jit, static_argnums=[0, 2])  
+    def reset(self, key: chex.PRNGKey, solvability: str = "both") -> Tuple[Dict[str, chex.Array], State]:
         """ Reset environment. Returns initial agent observations, states and the environment state """
         
-        state = self.sample_test_case(key)
+        state = self.sample_test_case(key, solvability)
         obs = self._get_obs(state)
         return {a: obs[i] for i, a in enumerate(self.agents)}, state
         
@@ -386,10 +386,10 @@ class JaxNav(MultiAgentEnv):
         
         return {a: jnp.array([1.0, 1.0]) for a in self.agents}  
              
-    def sample_test_case(self, key: chex.PRNGKey) -> State:
+    def sample_test_case(self, key: chex.PRNGKey, solvability: str = "both") -> State:
         
         key_tc, key_lambda = jax.random.split(key)
-        map_data, test_case = self._map_obj.sample_test_case(key_tc)
+        map_data, test_case = self._map_obj.sample_test_case(key_tc, solvability)
                         
         states = State(
             pos=test_case[:, 0, :2],
